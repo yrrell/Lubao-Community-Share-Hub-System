@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LSH v3.0 — System Flowchart & Architecture</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #f8fafc; color: #1e293b; }
+  header { background: #16a34a; color: white; padding: 24px 32px; }
+  header h1 { font-size: 22px; font-weight: 800; }
+  header p  { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+  .container { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+  h2 { font-size: 16px; font-weight: 700; color: #16a34a; border-left: 4px solid #16a34a;
+       padding-left: 12px; margin: 32px 0 16px; }
+  .mermaid { background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+             padding: 24px; overflow-x: auto; margin-bottom: 24px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+  .legend-item { display: flex; align-items: center; gap-6px; font-size: 12px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .info-box { background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+              padding: 20px; margin-bottom: 20px; }
+  .info-box h3 { font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 12px; }
+  ul { padding-left: 20px; }
+  li { font-size: 13px; line-height: 2; color: #475569; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #0f172a; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  footer { text-align: center; padding: 24px; font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #e2e8f0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌿 Lubao Community Share Hub — System Flowchart & Architecture</h1>
+  <p>Version 3.0.0 · Next.js 15 + TypeScript + Turso/libSQL · May 2025</p>
+</header>
+
+<div class="container">
+
+  <h2>1. Authentication Flow</h2>
+  <div class="mermaid">
+flowchart TD
+  A([Visitor]) --> B{Has account?}
+  B -- No --> C[/Register Page/]
+  C --> D[Fill form: name, address, birthday, Gov ID, photo]
+  D --> E[POST /api/auth/register]
+  E --> F[(Save to DB\nis_verified = 0)]
+  F --> G[Notify all Admins]
+  G --> H[Show success: Await email approval]
+  B -- Yes --> I[/Login Page/]
+  I --> J{Role?}
+  J -- Admin --> K[Check admins table\nBrute-force guard]
+  K --> L{Valid?}
+  L -- No --> M[Increment failed_attempts]
+  M --> N{5 attempts?}
+  N -- Yes --> O[Lock account 10 min\nLog to security_logs]
+  N -- No --> P[Return error + attempts left]
+  L -- Yes --> Q[Reset attempts\nSign JWT\nSet httpOnly cookie]
+  Q --> R[/admin/dashboard]
+  J -- User --> S[Check users table]
+  S --> T{Valid + verified?}
+  T -- No --> U[Return specific error\npending/suspended/banned]
+  T -- Yes --> V[Sign JWT\nSet cookie\nSend login email]
+  V --> W[/dashboard]
+  </div>
+
+  <h2>2. User Registration → Admin Approval Workflow</h2>
+  <div class="mermaid">
+sequenceDiagram
+  participant U as 👤 New User
+  participant SYS as 🖥 System
+  participant DB as 🗄 Database
+  participant ADM as 🛡 Admin
+
+  U->>SYS: Submit registration form\n(name, address, ID photo, profile pic)
+  SYS->>DB: INSERT users (is_verified=0, account_status='pending')
+  SYS->>DB: INSERT notifications for all admins
+  SYS-->>U: "Registration successful!\nAwait admin verification."
+
+  ADM->>SYS: Opens /admin/dashboard
+  SYS->>DB: SELECT pending users
+  DB-->>ADM: List with ID photos
+
+  alt Admin Approves
+    ADM->>SYS: Click "✓ Verify"
+    SYS->>DB: UPDATE is_verified=1, account_status='active'
+    SYS->>U: Send approval email
+    U->>SYS: Login → /dashboard
+  else Admin Rejects
+    ADM->>SYS: Click "✕ Reject"
+    SYS->>DB: DELETE user record
+    SYS->>U: Send rejection email
+  end
+  </div>
+
+  <h2>3. Tool Borrowing Flow</h2>
+  <div class="mermaid">
+flowchart LR
+  A[User browses\n/dashboard] --> B[Filter by\nAll/Free/Cash/GCash\nor Barangay]
+  B --> C[Click tool →\n/tools/:id]
+  C --> D[Fill Borrow\nRequest Form]
+  D --> E{Payment type?}
+  E -- Free --> F[POST /api/transactions\npayment_method='free']
+  E -- GCash/Cash --> G[Enter ref no.\nUpload screenshot]
+  G --> F
+  F --> H[(Insert transaction\nstatus='pending')]
+  H --> I[Notify Tool Owner]
+  I --> J[Owner sees\nLender Tasks badge]
+  J --> K{Owner decision}
+  K -- Approve --> L[PATCH /api/transactions/:id\naction='approve']
+  L --> M[(status='active')]
+  M --> N[Notify Borrower]
+  N --> O[Borrower views\nBorrowing Agreement]
+  O --> P[Print / Save PDF]
+  K -- Decline --> Q[(status='cancelled')]
+  Q --> R[Notify Borrower]
+  M --> S[Owner marks returned]
+  S --> T[(status='returned'\ntool available again)]
+  T --> U[Increment borrow_count]
+  </div>
+
+  <h2>4. Admin System Architecture</h2>
+  <div class="mermaid">
+flowchart TB
+  subgraph ADMIN["🛡 Admin Panel"]
+    A1[Dashboard\nOverview + KPIs]
+    A2[User Management\nVerify / Suspend / Delete]
+    A3[Tool Inventory\nApprove / Decline / Toggle]
+    A4[Reports & Appeals\nResolve / Dismiss]
+    A5[Security Logs\nAdmin accounts + lockouts]
+    A6[Admin Profile\nPassword change]
+  end
+
+  subgraph DB["🗄 Database (Turso/libSQL)"]
+    D1[(users)]
+    D2[(admins)]
+    D3[(tools)]
+    D4[(transactions)]
+    D5[(notifications)]
+    D6[(reports)]
+    D7[(messages)]
+    D8[(security_logs)]
+  end
+
+  A1 --> D1 & D3 & D4 & D6
+  A2 --> D1
+  A3 --> D3
+  A4 --> D6
+  A5 --> D2 & D8
+  A6 --> D2
+  </div>
+
+  <h2>5. Messaging System</h2>
+  <div class="mermaid">
+sequenceDiagram
+  participant B as 🙋 Borrower
+  participant API as /api/messages
+  participant DB as 🗄 DB
+  participant L as 🔧 Lender
+
+  B->>API: GET /api/messages?with=lender_id
+  API->>DB: SELECT messages (both directions)
+  API->>DB: UPDATE is_read=1 (received msgs)
+  DB-->>B: Message history
+
+  B->>API: POST /api/messages {body, receiver_id}
+  API->>DB: INSERT message
+  API->>DB: INSERT notification for lender
+  DB-->>B: New message object
+  B->>B: Optimistic UI update
+
+  Note over B,L: Auto-poll every 5 seconds
+  L->>API: GET /api/messages?with=borrower_id
+  API-->>L: New messages (marked read)
+  </div>
+
+  <h2>6. Complete Page Map</h2>
+  <div class="grid">
+    <div class="info-box">
+      <h3>👤 User Pages</h3>
+      <ul>
+        <li><code>/login</code> — User &amp; admin shared login</li>
+        <li><code>/register</code> — Registration with ID upload</li>
+        <li><code>/dashboard</code> — Find Tools (44 Barangays)</li>
+        <li><code>/tools</code> — Post a Tool</li>
+        <li><code>/tools/[id]</code> — Tool detail + Borrow form</li>
+        <li><code>/my-requests</code> — Lender Tasks + Borrow history</li>
+        <li><code>/chat</code> — Messenger-style chat</li>
+        <li><code>/chat?with=[id]</code> — Open conversation</li>
+        <li><code>/notifications</code> — Mark as read</li>
+        <li><code>/profile</code> — Account settings + security</li>
+        <li><code>/report</code> — Submit report / appeal</li>
+        <li><code>/agreement/[id]</code> — Printable borrowing PDF</li>
+      </ul>
+    </div>
+    <div class="info-box">
+      <h3>🛡 Admin Pages</h3>
+      <ul>
+        <li><code>/admin/dashboard</code> — Overview + pending approvals</li>
+        <li><code>/admin/users</code> — Manage all users</li>
+        <li><code>/admin/tools</code> — Review tool listings</li>
+        <li><code>/admin/reports</code> — Reports &amp; appeals</li>
+        <li><code>/admin/security</code> — Admin accounts + lockouts</li>
+        <li><code>/admin/profile</code> — Admin profile &amp; password</li>
+      </ul>
+      <h3 style="margin-top:16px;">🔌 API Routes</h3>
+      <ul>
+        <li><code>POST /api/auth/login</code> — JWT + brute-force guard</li>
+        <li><code>POST /api/auth/register</code> — File upload + notify</li>
+        <li><code>GET/POST /api/tools</code> — List / create tools</li>
+        <li><code>GET/PATCH /api/tools/[id]</code> — Tool detail / approve</li>
+        <li><code>GET/POST /api/transactions</code> — Borrow requests</li>
+        <li><code>PATCH /api/transactions/[id]</code> — Approve/decline/return</li>
+        <li><code>GET/POST /api/messages</code> — Chat messages</li>
+        <li><code>GET/PATCH /api/notifications</code> — Mark read</li>
+        <li><code>POST /api/reports</code> — Submit report</li>
+        <li><code>POST /api/profile/avatar</code> — Upload avatar</li>
+        <li><code>POST /api/admin/security</code> — Admin management</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>7. Security Architecture</h2>
+  <div class="info-box">
+    <h3>Security Measures Implemented</h3>
+    <ul>
+      <li><strong>JWT (HS256)</strong> — Stateless auth via httpOnly, sameSite=lax cookies. 7-day expiry.</li>
+      <li><strong>Brute-force protection</strong> — Admin accounts locked for 10 min after 5 failed attempts. All attempts logged to <code>security_logs</code>.</li>
+      <li><strong>Role separation</strong> — <code>admins</code> table is completely separate from <code>users</code>. Different auth paths.</li>
+      <li><strong>Middleware guard</strong> — Every request verified server-side. Role mismatches redirect immediately.</li>
+      <li><strong>File validation</strong> — Upload routes check MIME type, file size (max 5MB), and use random filenames.</li>
+      <li><strong>bcrypt (cost 12)</strong> — All passwords hashed before storage. Never stored in plaintext.</li>
+      <li><strong>No direct SQL from client</strong> — All DB access through parameterised queries via the Turso SDK.</li>
+      <li><strong>Account status checks</strong> — pending/suspended/banned users cannot log in with specific error messages.</li>
+      <li><strong>Server Actions</strong> — Sensitive mutations (verify user, delete, suspend) use Next.js Server Actions (server-only execution).</li>
+    </ul>
+  </div>
+
+</div>
+
+<footer>Lubao Community Share Hub v3.0 · System Architecture Document · Generated 2025</footer>
+
+<script>mermaid.initialize({ startOnLoad: true, theme: "default", themeVariables: { primaryColor: "#16a34a", primaryTextColor: "#fff", primaryBorderColor: "#15803d" } });</script>
+</body>
+</html>
